@@ -224,7 +224,13 @@ config_zsh_theme() {
         # 验证修改
         if grep -q "ZSH_THEME=\"${selected_theme}\"" "$zshrc"; then
             print_success "主题已切换为: ${BOLD}${selected_theme}${NC}"
-            print_info "执行 'source ~/.zshrc' 或重新打开终端使主题生效"
+            # 自动 source 使主题生效
+            if [ -n "$ZSH_VERSION" ]; then
+                source "$zshrc"
+                print_success "已自动 source ~/.zshrc，主题立即生效"
+            else
+                print_info "请执行 'source ~/.zshrc' 或重新打开终端使主题生效"
+            fi
         else
             print_error "主题切换失败，请检查 ~/.zshrc 文件"
         fi
@@ -1026,14 +1032,15 @@ menu_devenv() {
 
 show_banner() {
     echo -e "${CYAN}"
-    echo "  ╦ ╦╔═╗╔═╗╦╔═╔═╗╦ ╦"
-    echo "  ╠═╣╠═╣╚═╗╠╩╗║╣ ╚╦╝"
-    echo "  ╩ ╩╩ ╩╚═╝╩ ╩╚═╝ ╩ "
+    echo '  ██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗██╗   ██╗'
+    echo '  ██║  ██║██╔══██╗██╔════╝██║ ██╔╝██╔════╝╚██╗ ██╔╝'
+    echo '  ███████║███████║███████╗█████╔╝ █████╗   ╚████╔╝ '
+    echo '  ██╔══██║██╔══██║╚════██║██╔═██╗ ██╔══╝    ╚██╔╝  '
+    echo '  ██║  ██║██║  ██║███████║██║  ██╗███████╗   ██║   '
+    echo '  ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   '
     echo -e "${NC}"
     echo -e "  ${BOLD}Linux 系统常用命令合集${NC}"
-    echo -e "  版本: v1.0.0"
-    echo -e "  作者: kun775"
-    echo -e "  许可: MIT License"
+    echo -e "  版本: v1.0.0  |  作者: kun775  |  许可: MIT License"
     echo -e "  简介: 一键安装、配置和管理 Linux 系统常用工具"
     echo ""
 }
