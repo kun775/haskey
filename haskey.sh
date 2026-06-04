@@ -255,6 +255,773 @@ menu_zsh() {
     done
 }
 
+# ========================== 网络工具 ==========================
+
+# 查看网络配置
+net_info() {
+    print_title "网络配置信息"
+
+    print_info "── 网络接口 ──"
+    if command -v ip &>/dev/null; then
+        ip -color addr 2>/dev/null || ip addr
+    elif command -v ifconfig &>/dev/null; then
+        ifconfig
+    else
+        print_warn "未找到 ip 或 ifconfig 命令"
+    fi
+
+    echo ""
+    print_info "── 默认路由 ──"
+    if command -v ip &>/dev/null; then
+        ip route 2>/dev/null
+    elif command -v route &>/dev/null; then
+        route -n
+    fi
+
+    echo ""
+    print_info "── DNS 配置 ──"
+    if [ -f /etc/resolv.conf ]; then
+        grep -v '^#' /etc/resolv.conf | grep -v '^$'
+    else
+        print_warn "未找到 /etc/resolv.conf"
+    fi
+
+    press_any_key
+}
+
+# 网络连通性测试
+net_ping() {
+    print_title "网络连通性测试"
+
+    read -p "请输入目标地址（默认 8.8.8.8）: " target
+    target="${target:-8.8.8.8}"
+
+    echo ""
+    print_info "正在 ping ${target} ..."
+    echo ""
+    ping -c 4 "$target"
+    if [ $? -eq 0 ]; then
+        print_success "网络连通正常"
+    else
+        print_error "无法连通 ${target}"
+    fi
+
+    press_any_key
+}
+
+# DNS 查询
+net_dns() {
+    print_title "DNS 查询"
+
+    read -p "请输入域名（默认 google.com）: " domain
+    domain="${domain:-google.com}"
+
+    echo ""
+    if command -v dig &>/dev/null; then
+        print_info "dig 查询结果："
+        dig +short "$domain"
+    elif command -v nslookup &>/dev/null; then
+        print_info "nslookup 查询结果："
+        nslookup "$domain"
+    elif command -v host &>/dev/null; then
+        print_info "host 查询结果："
+        host "$domain"
+    else
+        print_error "未找到 dig / nslookup / host，请先安装 dnsutils"
+    fi
+
+    press_any_key
+}
+
+# 查看端口占用
+net_ports() {
+    print_title "端口占用情况"
+
+    print_info "── 监听端口（TCP）──"
+    echo ""
+    if command -v ss &>/dev/null; then
+        sudo ss -tlnp 2>/dev/null || ss -tlnp
+    elif command -v netstat &>/dev/null; then
+        sudo netstat -tlnp 2>/dev/null || netstat -tlnp
+    else
+        print_error "未找到 ss 或 netstat 命令"
+    fi
+
+    echo ""
+    print_info "── 监听端口（UDP）──"
+    echo ""
+    if command -v ss &>/dev/null; then
+        sudo ss -ulnp 2>/dev/null || ss -ulnp
+    elif command -v netstat &>/dev/null; then
+        sudo netstat -ulnp 2>/dev/null || netstat -ulnp
+    fi
+
+    press_any_key
+}
+
+# 查看网络连接统计
+net_connections() {
+    print_title "网络连接统计"
+
+    print_info "── 各状态连接数 ──"
+    echo ""
+    if command -v ss &>/dev/null; then
+        ss -tan 2>/dev/null | awk 'NR>1 {++s[$1]} END {for(k in s) printf "  %-16s %d\n", k, s[k]}'
+    elif command -v netstat &>/dev/null; then
+        netstat -tan 2>/dev/null | awk 'NR>2 {++s[$6]} END {for(k in s) printf "  %-16s %d\n", k, s[k]}'
+    fi
+
+    echo ""
+    print_info "── 连接数 TOP 10 远程 IP ──"
+    echo ""
+    if command -v ss &>/dev/null; then
+        ss -tan 2>/dev/null | awk 'NR>1 {print $5}' | grep -oP '[\d.]+(?=:)' | sort | uniq -c | sort -rn | head -10
+    fi
+
+    press_any_key
+}
+
+# 网络工具子菜单
+menu_network() {
+    while true; do
+        print_title "网络工具"
+        echo -e "  ${GREEN}1${NC}) 查看网络配置"
+        echo -e "  ${GREEN}2${NC}) 网络连通性测试（ping）"
+        echo -e "  ${GREEN}3${NC}) DNS 查询"
+        echo -e "  ${GREEN}4${NC}) 查看端口占用"
+        echo -e "  ${GREEN}5${NC}) 网络连接统计"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入编号: " choice
+        case "$choice" in
+            1) net_info ;;
+            2) net_ping ;;
+            3) net_dns ;;
+            4) net_ports ;;
+            5) net_connections ;;
+            0) return ;;
+            *) print_error "无效选择，请重新输入"; sleep 1 ;;
+        esac
+    done
+}
+
+# ========================== 系统监控 ==========================
+
+# 系统信息概览
+sys_overview() {
+    print_title "系统信息概览"
+
+    echo -e "  ${BOLD}主机名:${NC}     $(hostname 2>/dev/null)"
+    echo -e "  ${BOLD}内核版本:${NC}   $(uname -r 2>/dev/null)"
+    echo -e "  ${BOLD}系统发行:${NC}   $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')"
+    echo -e "  ${BOLD}架构:${NC}       $(uname -m 2>/dev/null)"
+    echo -e "  ${BOLD}运行时间:${NC}   $(uptime -p 2>/dev/null || uptime)"
+    echo -e "  ${BOLD}当前用户:${NC}   $(whoami)"
+    echo -e "  ${BOLD}登录用户:${NC}   $(who | wc -l) 个"
+    echo ""
+
+    print_info "── 负载 ──"
+    uptime
+    echo ""
+
+    print_info "── 登录用户 ──"
+    who 2>/dev/null || echo "  (无)"
+
+    press_any_key
+}
+
+# CPU 信息和使用率
+sys_cpu() {
+    print_title "CPU 信息和使用率"
+
+    print_info "── CPU 型号 ──"
+    if [ -f /proc/cpuinfo ]; then
+        grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs
+        echo -e "  核心数: $(grep -c processor /proc/cpuinfo)"
+    elif command -v lscpu &>/dev/null; then
+        lscpu | grep -E "Model name|CPU\(s\)"
+    fi
+
+    echo ""
+    print_info "── CPU 使用率（top 快照）──"
+    echo ""
+    if command -v top &>/dev/null; then
+        top -bn1 2>/dev/null | head -5
+    elif command -v mpstat &>/dev/null; then
+        mpstat 1 1
+    else
+        print_warn "未找到 top 或 mpstat"
+    fi
+
+    echo ""
+    print_info "── CPU 占用 TOP 10 进程 ──"
+    echo ""
+    ps aux --sort=-%cpu 2>/dev/null | head -11 || ps aux | head -11
+
+    press_any_key
+}
+
+# 内存使用情况
+sys_memory() {
+    print_title "内存使用情况"
+
+    print_info "── 内存概览 ──"
+    echo ""
+    if command -v free &>/dev/null; then
+        free -h
+    elif [ -f /proc/meminfo ]; then
+        head -5 /proc/meminfo
+    fi
+
+    echo ""
+    print_info "── 内存占用 TOP 10 进程 ──"
+    echo ""
+    ps aux --sort=-%mem 2>/dev/null | head -11 || ps aux | head -11
+
+    echo ""
+    print_info "── Swap 使用 ──"
+    echo ""
+    if command -v swapon &>/dev/null; then
+        swapon --show 2>/dev/null || echo "  (无 swap 或无权限)"
+    fi
+
+    press_any_key
+}
+
+# 磁盘使用情况
+sys_disk() {
+    print_title "磁盘使用情况"
+
+    print_info "── 磁盘空间 ──"
+    echo ""
+    df -hT 2>/dev/null | grep -v tmpfs | grep -v devtmpfs || df -h
+
+    echo ""
+    print_info "── 挂载点 ──"
+    echo ""
+    if command -v lsblk &>/dev/null; then
+        lsblk -o NAME,SIZE,TYPE,MOUNTPOINT 2>/dev/null
+    elif command -v mount &>/dev/null; then
+        mount | grep "^/dev"
+    fi
+
+    echo ""
+    print_info "── Inode 使用 ──"
+    echo ""
+    df -iT 2>/dev/null | grep -v tmpfs | grep -v devtmpfs | head -10
+
+    press_any_key
+}
+
+# 系统监控子菜单
+menu_monitor() {
+    while true; do
+        print_title "系统监控"
+        echo -e "  ${GREEN}1${NC}) 系统信息概览"
+        echo -e "  ${GREEN}2${NC}) CPU 信息和使用率"
+        echo -e "  ${GREEN}3${NC}) 内存使用情况"
+        echo -e "  ${GREEN}4${NC}) 磁盘使用情况"
+        echo -e "  ${GREEN}5${NC}) 实时资源监控（top）"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入编号: " choice
+        case "$choice" in
+            1) sys_overview ;;
+            2) sys_cpu ;;
+            3) sys_memory ;;
+            4) sys_disk ;;
+            5)
+                print_info "启动 top（按 q 退出）..."
+                sleep 1
+                top
+                ;;
+            0) return ;;
+            *) print_error "无效选择，请重新输入"; sleep 1 ;;
+        esac
+    done
+}
+
+# ========================== Docker 管理 ==========================
+
+# 检查 Docker 是否已安装
+check_docker() {
+    if ! command -v docker &>/dev/null; then
+        print_error "未检测到 Docker，请先安装"
+        return 1
+    fi
+    if ! docker info &>/dev/null; then
+        print_error "Docker 服务未运行或当前用户无权限（尝试 sudo 或将用户加入 docker 组）"
+        return 1
+    fi
+    return 0
+}
+
+# 安装 Docker
+docker_install() {
+    print_title "安装 Docker"
+
+    if command -v docker &>/dev/null; then
+        print_warn "Docker 已安装: $(docker --version)"
+        press_any_key
+        return
+    fi
+
+    print_info "正在安装 Docker ..."
+    echo ""
+
+    # 使用官方安装脚本
+    curl -fsSL https://get.docker.com | sudo sh
+    if [ $? -ne 0 ]; then
+        print_error "Docker 安装失败，请检查网络或手动安装"
+        press_any_key
+        return 1
+    fi
+
+    # 将当前用户加入 docker 组
+    sudo usermod -aG docker "$USER" 2>/dev/null
+    print_success "已将 ${USER} 加入 docker 组（重新登录后生效）"
+
+    # 启动 Docker
+    sudo systemctl enable docker 2>/dev/null
+    sudo systemctl start docker 2>/dev/null
+
+    if command -v docker &>/dev/null; then
+        print_success "Docker 安装完成: $(docker --version)"
+    else
+        print_error "安装后未检测到 docker 命令，请重新登录终端"
+    fi
+
+    press_any_key
+}
+
+# 查看容器列表
+docker_containers() {
+    print_title "Docker 容器"
+
+    print_info "── 运行中的容器 ──"
+    echo ""
+    docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+
+    echo ""
+    print_info "── 所有容器（含已停止）──"
+    echo ""
+    docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}" 2>/dev/null
+
+    press_any_key
+}
+
+# 查看镜像
+docker_images() {
+    print_title "Docker 镜像"
+
+    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedAt}}"
+
+    echo ""
+    print_info "── 悬空镜像 ──"
+    local dangling
+    dangling=$(docker images -f "dangling=true" -q 2>/dev/null)
+    if [ -n "$dangling" ]; then
+        echo "$dangling" | wc -l | xargs -I{} echo "  共 {} 个悬空镜像"
+        echo ""
+        read -p "是否清理悬空镜像？(y/N): " confirm
+        if [[ "$confirm" =~ ^[yY]$ ]]; then
+            docker image prune -f
+            print_success "悬空镜像已清理"
+        fi
+    else
+        echo "  (无悬空镜像)"
+    fi
+
+    press_any_key
+}
+
+# 容器操作
+docker_container_ops() {
+    print_title "容器操作"
+
+    # 列出运行中的容器
+    local containers
+    containers=$(docker ps --format "{{.ID}} {{.Names}}" 2>/dev/null)
+    local stopped
+    stopped=$(docker ps -a --filter "status=exited" --format "{{.ID}} {{.Names}}" 2>/dev/null)
+
+    if [ -z "$containers" ] && [ -z "$stopped" ]; then
+        print_warn "没有任何容器"
+        press_any_key
+        return
+    fi
+
+    while true; do
+        print_title "容器操作"
+
+        if [ -n "$containers" ]; then
+            echo -e "  ${BOLD}── 运行中的容器 ──${NC}"
+            local idx=1
+            local running_ids=()
+            while IFS= read -r line; do
+                local cid="${line%% *}"
+                local cname="${line#* }"
+                running_ids+=("$cid")
+                printf "  ${GREEN}%2d${NC}) %-14s %s\n" "$idx" "$cname" "$cid"
+                idx=$((idx + 1))
+            done <<< "$containers"
+        fi
+
+        if [ -n "$stopped" ]; then
+            echo ""
+            echo -e "  ${BOLD}── 已停止的容器 ──${NC}"
+            local stopped_ids=()
+            while IFS= read -r line; do
+                local cid="${line%% *}"
+                local cname="${line#* }"
+                stopped_ids+=("$cid")
+                printf "  ${YELLOW}%2d${NC}) %-14s %s\n" "$idx" "$cname" "$cid"
+                idx=$((idx + 1))
+            done <<< "$stopped"
+        fi
+
+        echo ""
+        echo -e "  ${BOLD}操作:${NC}  s=启动  x=停止  r=重启  d=删除  l=查看日志"
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入操作: " op
+        case "$op" in
+            0) return ;;
+            s|x|r|d|l)
+                read -p "请输入容器名称或 ID: " target
+                if [ -z "$target" ]; then
+                    print_error "未输入容器标识"
+                    sleep 1
+                    continue
+                fi
+                case "$op" in
+                    s) docker start "$target" && print_success "已启动 $target" ;;
+                    x) docker stop "$target" && print_success "已停止 $target" ;;
+                    r) docker restart "$target" && print_success "已重启 $target" ;;
+                    d)
+                        read -p "确认删除容器 $target？(y/N): " confirm
+                        if [[ "$confirm" =~ ^[yY]$ ]]; then
+                            docker rm -f "$target" && print_success "已删除 $target"
+                        fi
+                        ;;
+                    l) docker logs --tail 50 "$target" ;;
+                esac
+                press_any_key
+                ;;
+            *) print_error "无效操作"; sleep 1 ;;
+        esac
+    done
+}
+
+# Docker Compose 操作
+docker_compose_ops() {
+    print_title "Docker Compose"
+
+    # 检查 docker compose 或 docker-compose
+    local compose_cmd=""
+    if docker compose version &>/dev/null; then
+        compose_cmd="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        compose_cmd="docker-compose"
+    else
+        print_error "未检测到 Docker Compose，请先安装"
+        press_any_key
+        return
+    fi
+
+    print_info "使用: ${compose_cmd}"
+    echo ""
+
+    read -p "请输入 docker-compose.yml 所在目录（默认当前目录）: " compose_dir
+    compose_dir="${compose_dir:-.}"
+
+    if [ ! -f "${compose_dir}/docker-compose.yml" ] && [ ! -f "${compose_dir}/compose.yml" ]; then
+        print_error "目录下未找到 docker-compose.yml 或 compose.yml"
+        press_any_key
+        return
+    fi
+
+    while true; do
+        print_title "Docker Compose"
+        echo -e "  ${GREEN}1${NC}) 启动服务（up -d）"
+        echo -e "  ${GREEN}2${NC}) 停止服务（down）"
+        echo -e "  ${GREEN}3${NC}) 重启服务（restart）"
+        echo -e "  ${GREEN}4${NC}) 查看日志（logs -f）"
+        echo -e "  ${GREEN}5${NC}) 查看服务状态（ps）"
+        echo -e "  ${GREEN}6${NC}) 重新构建（up -d --build）"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入编号: " cchoice
+        case "$cchoice" in
+            1) (cd "$compose_dir" && $compose_cmd up -d); press_any_key ;;
+            2) (cd "$compose_dir" && $compose_cmd down); press_any_key ;;
+            3) (cd "$compose_dir" && $compose_cmd restart); press_any_key ;;
+            4)
+                print_info "查看日志（Ctrl+C 退出）..."
+                sleep 1
+                (cd "$compose_dir" && $compose_cmd logs -f --tail 50)
+                ;;
+            5) (cd "$compose_dir" && $compose_cmd ps); press_any_key ;;
+            6) (cd "$compose_dir" && $compose_cmd up -d --build); press_any_key ;;
+            0) return ;;
+            *) print_error "无效选择"; sleep 1 ;;
+        esac
+    done
+}
+
+# Docker 管理子菜单
+menu_docker() {
+    while true; do
+        print_title "Docker 管理"
+        echo -e "  ${GREEN}1${NC}) 安装 Docker"
+        echo -e "  ${GREEN}2${NC}) 查看容器"
+        echo -e "  ${GREEN}3${NC}) 查看镜像"
+        echo -e "  ${GREEN}4${NC}) 容器操作（启动/停止/重启/删除/日志）"
+        echo -e "  ${GREEN}5${NC}) Docker Compose"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入编号: " choice
+        case "$choice" in
+            1) docker_install ;;
+            2) check_docker && docker_containers ;;
+            3) check_docker && docker_images ;;
+            4) check_docker && docker_container_ops ;;
+            5) check_docker && docker_compose_ops ;;
+            0) return ;;
+            *) print_error "无效选择，请重新输入"; sleep 1 ;;
+        esac
+    done
+}
+
+# ========================== 开发环境 ==========================
+
+# 安装 Node.js（通过 nvm）
+devenv_nodejs() {
+    print_title "安装 Node.js（nvm）"
+
+    if command -v node &>/dev/null; then
+        print_info "当前 Node.js: $(node --version)"
+    fi
+    if command -v nvm &>/dev/null || [ -f "$HOME/.nvm/nvm.sh" ]; then
+        print_info "nvm 已安装"
+        source "$HOME/.nvm/nvm.sh" 2>/dev/null
+        nvm --version 2>/dev/null
+    else
+        print_info "正在安装 nvm ..."
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+        if [ $? -ne 0 ]; then
+            print_error "nvm 安装失败"
+            press_any_key
+            return 1
+        fi
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+        print_success "nvm 安装完成"
+    fi
+
+    echo ""
+    read -p "请输入要安装的 Node.js 版本（默认 lts，回车跳过安装）: " node_ver
+    if [ -n "$node_ver" ]; then
+        nvm install "$node_ver"
+        nvm use "$node_ver"
+        nvm alias default "$node_ver"
+        print_success "Node.js $(node --version) 安装完成"
+    else
+        print_info "跳过 Node.js 安装"
+    fi
+
+    press_any_key
+}
+
+# 安装 Python
+devenv_python() {
+    print_title "安装 Python"
+
+    if command -v python3 &>/dev/null; then
+        print_info "当前 Python3: $(python3 --version)"
+    fi
+    if command -v python &>/dev/null; then
+        print_info "当前 Python:  $(python --version)"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}1${NC}) 通过包管理器安装 Python3 + pip"
+    echo -e "  ${GREEN}2${NC}) 通过 pyenv 安装（可管理多版本）"
+    echo ""
+    echo -e "  ${YELLOW}0${NC}) 返回上一级"
+    echo ""
+    print_line
+
+    read -p "请输入编号: " pchoice
+    case "$pchoice" in
+        1)
+            detect_pkg_manager || return 1
+            $PKG_UPDATE
+            $PKG_INSTALL python3 python3-pip python3-venv
+            print_success "Python3 安装完成: $(python3 --version)"
+            press_any_key
+            ;;
+        2)
+            if command -v pyenv &>/dev/null; then
+                print_info "pyenv 已安装: $(pyenv --version)"
+            else
+                print_info "正在安装 pyenv ..."
+                curl https://pyenv.run | bash
+                if [ $? -ne 0 ]; then
+                    print_error "pyenv 安装失败"
+                    press_any_key
+                    return 1
+                fi
+                export PYENV_ROOT="$HOME/.pyenv"
+                export PATH="$PYENV_ROOT/bin:$PATH"
+                eval "$(pyenv init -)" 2>/dev/null
+                print_success "pyenv 安装完成"
+            fi
+            echo ""
+            read -p "请输入 Python 版本（默认 3.12.0，回车跳过）: " py_ver
+            if [ -n "$py_ver" ]; then
+                pyenv install "$py_ver"
+                pyenv global "$py_ver"
+                print_success "Python $py_ver 安装完成"
+            fi
+            press_any_key
+            ;;
+        0) return ;;
+        *) print_error "无效选择"; sleep 1 ;;
+    esac
+}
+
+# Git 配置
+devenv_git_config() {
+    print_title "Git 配置"
+
+    print_info "── 当前配置 ──"
+    echo -e "  用户名: ${BOLD}$(git config --global user.name 2>/dev/null || echo '(未设置)')${NC}"
+    echo -e "  邮箱:   ${BOLD}$(git config --global user.email 2>/dev/null || echo '(未设置)')${NC}"
+    echo -e "  编辑器: ${BOLD}$(git config --global core.editor 2>/dev/null || echo '(未设置)')${NC}"
+    echo ""
+
+    read -p "设置用户名（回车跳过）: " git_name
+    read -p "设置邮箱（回车跳过）: " git_email
+    read -p "设置默认编辑器 [vim/nano/code]（回车跳过）: " git_editor
+
+    [ -n "$git_name" ] && git config --global user.name "$git_name" && print_success "用户名: $git_name"
+    [ -n "$git_email" ] && git config --global user.email "$git_email" && print_success "邮箱: $git_email"
+    [ -n "$git_editor" ] && git config --global core.editor "$git_editor" && print_success "编辑器: $git_editor"
+
+    # 常用别名
+    echo ""
+    read -p "是否配置常用 Git 别名？(y/N): " alias_confirm
+    if [[ "$alias_confirm" =~ ^[yY]$ ]]; then
+        git config --global alias.st status
+        git config --global alias.co checkout
+        git config --global alias.br branch
+        git config --global alias.ci commit
+        git config --global alias.lg "log --oneline --graph --decorate"
+        git config --global alias.cp cherry-pick
+        git config --global alias.last "log -1 HEAD"
+        print_success "Git 别名已配置 (st, co, br, ci, lg, cp, last)"
+    fi
+
+    press_any_key
+}
+
+# 安装常用开发工具
+devenv_tools() {
+    print_title "安装常用开发工具"
+
+    detect_pkg_manager || return 1
+
+    local tools=("curl" "wget" "vim" "tmux" "htop" "jq" "tree" "unzip" "ripgrep" "fd-find")
+    local descriptions=(
+        "HTTP 客户端工具"
+        "文件下载工具"
+        "终端编辑器"
+        "终端多路复用器"
+        "交互式进程查看器"
+        "JSON 处理工具"
+        "目录树展示工具"
+        "解压工具"
+        "更快的 grep（rg）"
+        "更快的 find（fd）"
+    )
+
+    echo -e "${BOLD}将安装以下工具：${NC}"
+    echo ""
+    for i in "${!tools[@]}"; do
+        local num=$((i + 1))
+        local status="待安装"
+        if command -v "${tools[$i]}" &>/dev/null; then
+            status="${GREEN}已安装${NC}"
+        fi
+        printf "  %2d) %-14s - %-20s [%b]\n" "$num" "${tools[$i]}" "${descriptions[$i]}" "$status"
+    done
+
+    echo ""
+    read -p "安装全部？(y/N)，或输入编号安装单个（逗号分隔）: " install_choice
+
+    if [[ "$install_choice" =~ ^[yY]$ ]]; then
+        $PKG_UPDATE
+        for tool in "${tools[@]}"; do
+            $PKG_INSTALL "$tool" 2>/dev/null
+        done
+        print_success "全部工具安装完成"
+    elif [ -n "$install_choice" ]; then
+        $PKG_UPDATE
+        IFS=',' read -ra selected <<< "$install_choice"
+        for idx in "${selected[@]}"; do
+            idx=$(echo "$idx" | xargs)
+            if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -ge 1 ] && [ "$idx" -le "${#tools[@]}" ]; then
+                local tool="${tools[$((idx - 1))]}"
+                print_info "安装 ${tool} ..."
+                $PKG_INSTALL "$tool" 2>/dev/null
+            fi
+        done
+        print_success "选定工具安装完成"
+    fi
+
+    press_any_key
+}
+
+# 开发环境子菜单
+menu_devenv() {
+    while true; do
+        print_title "开发环境"
+        echo -e "  ${GREEN}1${NC}) 安装 Node.js（nvm）"
+        echo -e "  ${GREEN}2${NC}) 安装 Python"
+        echo -e "  ${GREEN}3${NC}) Git 配置"
+        echo -e "  ${GREEN}4${NC}) 安装常用开发工具"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回上一级"
+        echo ""
+        print_line
+
+        read -p "请输入编号: " choice
+        case "$choice" in
+            1) devenv_nodejs ;;
+            2) devenv_python ;;
+            3) devenv_git_config ;;
+            4) devenv_tools ;;
+            0) return ;;
+            *) print_error "无效选择，请重新输入"; sleep 1 ;;
+        esac
+    done
+}
+
 # ========================== 主菜单 ==========================
 
 show_banner() {
@@ -280,10 +1047,10 @@ main_menu() {
         print_line
         echo ""
         echo -e "  ${GREEN}1${NC}) zsh 管理"
-        echo -e "  ${GREEN}2${NC}) 网络工具（待开发）"
-        echo -e "  ${GREEN}3${NC}) 系统监控（待开发）"
-        echo -e "  ${GREEN}4${NC}) Docker 管理（待开发）"
-        echo -e "  ${GREEN}5${NC}) 开发环境（待开发）"
+        echo -e "  ${GREEN}2${NC}) 网络工具"
+        echo -e "  ${GREEN}3${NC}) 系统监控"
+        echo -e "  ${GREEN}4${NC}) Docker 管理"
+        echo -e "  ${GREEN}5${NC}) 开发环境"
         echo ""
         echo -e "  ${YELLOW}0${NC}) 退出"
         echo ""
@@ -292,10 +1059,10 @@ main_menu() {
         read -p "请输入编号: " choice
         case "$choice" in
             1) menu_zsh ;;
-            2) print_warn "功能开发中，敬请期待"; sleep 1 ;;
-            3) print_warn "功能开发中，敬请期待"; sleep 1 ;;
-            4) print_warn "功能开发中，敬请期待"; sleep 1 ;;
-            5) print_warn "功能开发中，敬请期待"; sleep 1 ;;
+            2) menu_network ;;
+            3) menu_monitor ;;
+            4) menu_docker ;;
+            5) menu_devenv ;;
             0)
                 echo ""
                 echo -e "${GREEN}感谢使用 haskey，再见！${NC}"
