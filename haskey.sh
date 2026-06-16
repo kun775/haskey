@@ -1347,6 +1347,7 @@ main_menu() {
         echo -e "  ${GREEN}3${NC}) 系统监控"
         echo -e "  ${GREEN}4${NC}) Docker 管理"
         echo -e "  ${GREEN}5${NC}) 开发环境"
+        echo -e "  ${GREEN}6${NC}) Nezha 安全工具箱"
         echo ""
         echo -e "  ${YELLOW}0${NC}) 退出"
         echo ""
