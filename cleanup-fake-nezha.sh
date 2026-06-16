@@ -1,40 +1,124 @@
 #!/bin/bash
 # ============================================================
-#  清理虚假哪吒 Agent + 加固安全配置
+#  清理虚假哪吒 Agent + 加固安全配置 + 入侵检测
 #  真实 server：nz.zkun.de:8008
 #  其他 server 一律视为恶意植入，删除
 #  所有真实 agent 的 config 统一重命名为 config.yml，
 #  并更新 systemd service 指向 config.yml
 # ============================================================
-# 版本: 2026-06-16-v2
+# 版本: 2026-06-16-v3
 set -e
 
-# 脚本版本号
-SCRIPT_VERSION="2026-06-16-v2"
-
+SCRIPT_VERSION="2026-06-16-v3"
 REAL_SERVER="nz.zkun.de:8008"
 AGENT_DIR="/opt/nezha/agent"
 BIN="$AGENT_DIR/nezha-agent"
 
-# MD5 校验（期望值全大写）
+# ANSI 颜色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+red()   { echo -e "${RED}$*${NC}"; }
+green() { echo -e "${GREEN}$*${NC}"; }
+yellow(){ echo -e "${YELLOW}$*${NC}"; }
+
+echo "脚本版本: $SCRIPT_VERSION"
+echo ""
+
+# ==========================================
+#  阶段 0: 二进制校验（不一致仅警告，不阻断）
+# ==========================================
 BIN_MD5_EXPECTED="F577C5450B116FF905F3D5C1859A9892"
 if [ -f "$BIN" ]; then
   actual=$(md5sum "$BIN" | awk '{print $1}' | tr 'a-z' 'A-Z')
   if [ "$actual" != "$BIN_MD5_EXPECTED" ]; then
-    echo "=========================================="
-    echo " 安全警告：nezha-agent 二进制校验不匹配！"
-    echo " 期望: $BIN_MD5_EXPECTED"
-    echo " 实际: $actual"
-    echo " 文件可能已被篡改，脚本终止不执行任何操作"
-    echo "=========================================="
-    exit 1
+    red "=========================================="
+    red " 安全警告：nezha-agent 二进制校验不匹配！"
+    red " 期望: $BIN_MD5_EXPECTED"
+    red " 实际: $actual"
+    red " 文件可能已被篡改（如为 ARM 架构则正常）"
+    red " 脚本继续执行，请留意以上异常"
+    red "=========================================="
   else
-    echo "  nezha-agent 二进制 MD5 校验通过"
+    green "  nezha-agent 二进制 MD5 校验通过"
   fi
 fi
-echo "脚本版本: $SCRIPT_VERSION"
 echo ""
 
+# ==========================================
+#  阶段 1: 入侵检测（非破坏性）
+# ==========================================
+echo "=========================================="
+echo " 阶段 1: 入侵检测..."
+echo "=========================================="
+
+# ---- 1a: SystemLog 后门 ----
+syslog_detected=0
+if [ -f /opt/systemlog/SystemLoger ] || [ -f /opt/systemlog/SystemLog ] || [ -d /opt/systemlog ]; then
+  red "[!] 检测到 SystemLog 后门痕迹！"
+  [ -d /opt/systemlog ] && red "    /opt/systemlog/ 目录存在"
+  [ -f /opt/systemlog/SystemLoger ] && red "    /opt/systemlog/SystemLoger (C2: 24.144.123.109)"
+  [ -f /opt/systemlog/SystemLog ] && red "    /opt/systemlog/SystemLog"
+  syslog_detected=1
+else
+  green "  ✅ SystemLog 后门: 未发现"
+fi
+
+# ---- 1b: /tmp/SystemLog ----
+if [ -f /tmp/SystemLog ]; then
+  red "[!] 检测到 /tmp/SystemLog (可疑文件)"
+  syslog_detected=1
+fi
+
+# ---- 1c: systemlog systemd service ----
+if systemctl list-units --type=service --all 2>/dev/null | grep -q 'systemlog'; then
+  red "[!] 检测到 systemlog systemd 服务"
+  systemctl status systemlog --no-pager 2>/dev/null | grep -E 'ExecStart|Active' | head -3 | while read -r line; do
+    red "    $line"
+  done
+  syslog_detected=1
+fi
+
+# ---- 1d: SSH authorized_keys 检查 ----
+if [ -f /root/.ssh/authorized_keys ]; then
+  key_count=$(grep -c 'ssh-' /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+  if [ "$key_count" -gt 0 ]; then
+    red "[!] /root/.ssh/authorized_keys 中存在 $key_count 条公钥！"
+    while IFS= read -r line; do
+      comment=$(echo "$line" | awk '{print $NF}')
+      keytype=$(echo "$line" | awk '{print $1}')
+      red "    [$keytype] $comment"
+    done < /root/.ssh/authorized_keys
+  fi
+else
+  green "  ✅ SSH authorized_keys: 无（安全）"
+fi
+
+# ---- 1e: memfd 可疑进程 ----
+memfd_kworker=$(ls -la /proc/*/fd/ 2>/dev/null | grep 'memfd' | grep -i 'kworker' || true)
+if [ -n "$memfd_kworker" ]; then
+  red "[!] 检测到伪装为 kworker 的 memfd 进程！"
+  echo "$memfd_kworker" | while read -r line; do
+    pid=$(echo "$line" | awk -F'/' '{print $3}')
+    red "    PID $pid: $line"
+  done
+fi
+
+if [ "$syslog_detected" -eq 1 ]; then
+  echo ""
+  yellow "  ⚠️  建议手动清理后门："
+  yellow "     systemctl stop systemlog"
+  yellow "     systemctl disable systemlog"
+  yellow "     rm -rf /opt/systemlog /tmp/SystemLog"
+  yellow "     rm -f /etc/systemd/system/systemlog*"
+  yellow "     rm -f /root/.ssh/authorized_keys  # 并更换 SSH 密码"
+fi
+echo ""
+
+# ==========================================
+#  阶段 2: 辅助函数
+# ==========================================
 helper_set_config() {
   local key="$1" val="$2" cfg="$3"
   if grep -q "^${key}:" "$cfg"; then
@@ -44,9 +128,11 @@ helper_set_config() {
   fi
 }
 
-# ---- 步骤 1: 查找所有 nezha 配置 ----
+# ==========================================
+#  阶段 3: 扫描所有 nezha 配置
+# ==========================================
 echo "=========================================="
-echo " 步骤 1: 扫描所有 Nezha Agent 配置..."
+echo " 阶段 3: 扫描所有 Nezha Agent 配置..."
 echo "=========================================="
 
 configs=$(find "$AGENT_DIR" -name 'config*.yml' 2>/dev/null || true)
@@ -63,7 +149,9 @@ fi
 
 echo ""
 
-# ---- 步骤 2: 每个 config 单独处理 ----
+# ==========================================
+#  阶段 4: 每个 config 单独处理
+# ==========================================
 for cfg in $configs; do
   server=$(grep '^server:' "$cfg" 2>/dev/null | awk '{print $2}')
   cfgname=$(basename "$cfg")
@@ -136,9 +224,11 @@ for cfg in $configs; do
   fi
 done
 
-# ---- 步骤 3: 清理残留 ----
+# ==========================================
+#  阶段 5: 清理残留
+# ==========================================
 echo "=========================================="
-echo " 步骤 3: 清理残留..."
+echo " 阶段 5: 清理残留..."
 echo "=========================================="
 
 # 孤立 service（配置已不存在的）
@@ -169,7 +259,9 @@ done
 
 systemctl daemon-reload 2>/dev/null || true
 
-# ---- 最终状态 ----
+# ==========================================
+#  最终状态
+# ==========================================
 echo ""
 echo "=========================================="
 echo " 清理与加固完成！"
@@ -188,5 +280,4 @@ find "$AGENT_DIR" -name 'config*.yml' 2>/dev/null | while read -r f; do
 done
 
 # 确保退出码为 0
-[ "$BASH_SUBSHELL" = "0" ] 2>/dev/null || true
 exit 0
