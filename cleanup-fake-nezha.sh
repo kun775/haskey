@@ -6,7 +6,11 @@
 #  所有真实 agent 的 config 统一重命名为 config.yml，
 #  并更新 systemd service 指向 config.yml
 # ============================================================
+# 版本: 2026-06-16-v2
 set -e
+
+# 脚本版本号
+SCRIPT_VERSION="2026-06-16-v2"
 
 REAL_SERVER="nz.zkun.de:8008"
 AGENT_DIR="/opt/nezha/agent"
@@ -28,6 +32,7 @@ if [ -f "$BIN" ]; then
     echo "  nezha-agent 二进制 MD5 校验通过"
   fi
 fi
+echo "脚本版本: $SCRIPT_VERSION"
 echo ""
 
 helper_set_config() {
@@ -181,3 +186,7 @@ find "$AGENT_DIR" -name 'config*.yml' 2>/dev/null | while read -r f; do
   srv=$(grep '^server:' "$f" | awk '{print $2}')
   echo "  $f -> server: $srv"
 done
+
+# 确保退出码为 0
+[ "$BASH_SUBSHELL" = "0" ] 2>/dev/null || true
+exit 0
