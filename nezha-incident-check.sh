@@ -210,13 +210,26 @@ check_accounts() {
     section "3. 账户、UID 0 与 sudoers"
     echo "UID 0 账户:"
     awk -F: '$3 == 0 {print $1":"$3":"$6":"$7}' /etc/passwd 2>/dev/null
-    local uid0_count
-    uid0_count=$(awk -F: '$3 == 0 {count++} END {print count+0}' /etc/passwd 2>/dev/null)
-    [ "$uid0_count" -gt 1 ] && alert "发现非 root UID 0 账户，请人工确认"
+
+    local extra_uid0
+    extra_uid0=$(awk -F: '$3 == 0 && $1 != "root" {print $1":"$3":"$6":"$7}' /etc/passwd 2>/dev/null)
+    if [ -n "$extra_uid0" ]; then
+        alert "发现非 root UID 0 账户，请立即人工确认/删除: $(echo "$extra_uid0" | paste -sd ', ' -)"
+    fi
 
     echo ""
     echo "可登录 shell 账户:"
     awk -F: '$7 !~ /(nologin|false|sync|shutdown|halt)$/ {print $1":"$3":"$6":"$7}' /etc/passwd 2>/dev/null
+
+    local service_shells
+    service_shells=$(awk -F: '$3 > 0 && $3 < 1000 && $7 !~ /(nologin|false|sync|shutdown|halt)$/ {print $1":"$3":"$6":"$7}' /etc/passwd 2>/dev/null)
+    if [ -n "$service_shells" ]; then
+        warn "发现低 UID 服务账户带可登录 shell，建议确认是否可改为 nologin: $(echo "$service_shells" | paste -sd ', ' -)"
+    fi
+
+    if grep -qi 'synology\|dsm' /etc.defaults/VERSION /etc/VERSION 2>/dev/null; then
+        info "检测到疑似群晖 DSM：root 使用 /bin/ash 通常正常；重点关注非 root UID 0 与服务账户 shell"
+    fi
 
     echo ""
     echo "最近修改的账户文件:"
@@ -403,8 +416,9 @@ summary() {
     echo "1. 保存本报告和 /var/log、哪吒日志、面板配置文件的副本。"
     echo "2. 立即重置哪吒面板密码、JWT/secret、Agent 密钥。"
     echo "3. 人工确认 authorized_keys、sudoers、cron、systemd 中的异常项。"
-    echo "4. 限制面板仅允许可信 IP 访问，关闭公网裸露管理面。"
-    echo "5. 若发现 UID 0 后门、未知 systemd、反连进程，优先考虑重装系统并恢复可信数据。"
+    echo "4. 群晖 DSM 上 root:/bin/ash 通常正常；优先处理非 root UID 0 账户。"
+    echo "5. 限制面板仅允许可信 IP 访问，关闭公网裸露管理面。"
+    echo "6. 若发现 UID 0 后门、未知 systemd、反连进程，优先考虑重装系统并恢复可信数据。"
 }
 
 main() {
