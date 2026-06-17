@@ -13,6 +13,9 @@ NC='\033[0m'
 ALERT_COUNT=0
 WARN_COUNT=0
 INFO_COUNT=0
+CURRENT_SECTION="启动"
+ALERT_DETAILS=()
+WARN_DETAILS=()
 HOSTNAME_SAFE=$(hostname 2>/dev/null | tr -cd '[:alnum:]._-' || echo unknown)
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REPORT="/root/nezha-incident-report-${HOSTNAME_SAFE}-${TIMESTAMP}.txt"
@@ -34,6 +37,7 @@ color() {
 }
 
 section() {
+    CURRENT_SECTION="$1"
     echo ""
     echo "=========================================="
     echo "$1"
@@ -43,11 +47,13 @@ section() {
 alert() {
     color "$RED" "[!] $*"
     ALERT_COUNT=$((ALERT_COUNT + 1))
+    ALERT_DETAILS+=("${CURRENT_SECTION}: $*")
 }
 
 warn() {
     color "$YELLOW" "[?] $*"
     WARN_COUNT=$((WARN_COUNT + 1))
+    WARN_DETAILS+=("${CURRENT_SECTION}: $*")
 }
 
 ok() {
@@ -370,7 +376,26 @@ summary() {
     if [ "$ALERT_COUNT" -eq 0 ]; then
         ok "未发现明显高危入侵痕迹，但仍建议结合云厂商登录记录和快照做复核"
     else
-        alert "发现高危迹象，请先保全报告和日志，再清理后门/轮换密钥/限制面板访问"
+        color "$RED" "[!] 发现高危迹象，请先保全报告和日志，再清理后门/轮换密钥/限制面板访问"
+        echo ""
+        echo "高危告警明细:"
+        local idx=1
+        local item
+        for item in "${ALERT_DETAILS[@]}"; do
+            printf '  %d. %s\n' "$idx" "$item"
+            idx=$((idx + 1))
+        done
+    fi
+
+    if [ "$WARN_COUNT" -gt 0 ]; then
+        echo ""
+        echo "注意事项明细:"
+        local warn_idx=1
+        local warn_item
+        for warn_item in "${WARN_DETAILS[@]}"; do
+            printf '  %d. %s\n' "$warn_idx" "$warn_item"
+            warn_idx=$((warn_idx + 1))
+        done
     fi
 
     echo ""
