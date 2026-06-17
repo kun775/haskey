@@ -1049,6 +1049,7 @@ show_banner() {
 # ========================== Nezha 安全工具箱 ==========================
 
 SCRIPT_VERSION="2026-06-16-v4"
+HASKEY_RAW_BASE="https://raw.githubusercontent.com/kun775/haskey/main"
 REAL_SERVER="nz.zkun.de:8008"
 AGENT_DIR="/opt/nezha/agent"
 BIN="$AGENT_DIR/nezha-agent"
@@ -1068,6 +1069,36 @@ helper_set_config() {
   else
     echo "${key}: ${val}" | sudo tee -a "$cfg" > /dev/null
   fi
+}
+
+module_incident_report() {
+  echo ""
+  print_title "Nezha 深度取证报告"
+  echo -e "${YELLOW}说明：此功能只读取证据，不清理、不修改系统。${NC}"
+  echo -e "报告默认保存到: ${BOLD}/root/nezha-incident-report-*.txt${NC}"
+  echo ""
+
+  local attacker_ip
+  read -r -p "重点关注 IP（回车默认 207.58.173.192）: " attacker_ip
+  attacker_ip="${attacker_ip:-207.58.173.192}"
+
+  local script_dir script_path
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  script_path="${script_dir}/nezha-incident-check.sh"
+
+  if [ -f "$script_path" ]; then
+    print_info "使用本地脚本: $script_path"
+    sudo ATTACKER_IP="$attacker_ip" bash "$script_path"
+    return $?
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    print_error "未找到 curl，无法拉取远程取证脚本"
+    return 1
+  fi
+
+  print_info "未找到本地脚本，正在从 GitHub 拉取并执行..."
+  curl -fsSL "${HASKEY_RAW_BASE}/nezha-incident-check.sh" | sudo ATTACKER_IP="$attacker_ip" bash
 }
 
 module_intrusion_detect() {
@@ -1317,7 +1348,10 @@ menu_nezha() {
         echo -e "  ${GREEN}3${NC}) 清理虚假Agent + 加固"
         echo -e "     清理非白名单 Agent / 统一 config.yml / 禁用危险功能"
         echo ""
-        echo -e "  ${GREEN}4${NC}) 全量执行"
+        echo -e "  ${GREEN}4${NC}) 深度取证报告"
+        echo -e "     只读检测 SSH/账户/cron/systemd/日志/可疑连接，生成报告"
+        echo ""
+        echo -e "  ${GREEN}5${NC}) 全量执行"
         echo ""
         echo -e "  ${YELLOW}0${NC}) 返回主菜单"
         echo ""
@@ -1327,7 +1361,8 @@ menu_nezha() {
             1) module_intrusion_detect; read -p "按回车返回..." ;;
             2) module_ssh_security; read -p "按回车返回..." ;;
             3) module_clean_and_harden; read -p "按回车返回..." ;;
-            4) module_intrusion_detect; module_ssh_security; module_clean_and_harden; read -p "按回车返回..." ;;
+            4) module_incident_report; read -p "按回车返回..." ;;
+            5) module_intrusion_detect; module_ssh_security; module_clean_and_harden; read -p "按回车返回..." ;;
             0) return ;;
             *) print_error "无效选择"; sleep 1 ;;
         esac

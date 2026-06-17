@@ -26,6 +26,25 @@ bash <(curl -sL https://raw.githubusercontent.com/kun775/haskey/main/haskey.sh)
 - **系统监控** — 系统概览、CPU/内存/磁盘使用率、实时 top 监控
 - **Docker 管理** — 安装 Docker、容器与镜像管理、容器操作、Docker Compose
 - **开发环境** — Node.js（nvm）、Python（pyenv）、Git 配置、常用开发工具批量安装
+- **Nezha 安全工具箱** — 入侵检测、SSH 安全检测、虚假 Agent 清理加固、深度取证报告
+
+### Nezha 深度取证报告
+
+服务器禁止 root 登录时，可用普通 sudo 用户远程一键执行：
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/kun775/haskey/main/haskey.sh)
+```
+
+进入菜单：`Nezha 安全工具箱` → `深度取证报告`。
+
+也可以直接运行取证脚本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kun775/haskey/main/nezha-incident-check.sh | sudo ATTACKER_IP=207.58.173.192 bash
+```
+
+该脚本只读取证据，不清理、不修改系统，报告保存到 `/root/nezha-incident-report-*.txt`。
 
 ## 支持的包管理器
 
