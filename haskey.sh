@@ -224,7 +224,13 @@ config_zsh_theme() {
         # 验证修改
         if grep -q "ZSH_THEME=\"${selected_theme}\"" "$zshrc"; then
             print_success "主题已切换为: ${BOLD}${selected_theme}${NC}"
-            print_info "执行 'source ~/.zshrc' 或重新打开终端使主题生效"
+            # 自动 source 使主题生效
+            if [ -n "$ZSH_VERSION" ]; then
+                source "$zshrc"
+                print_success "已自动 source ~/.zshrc，主题立即生效"
+            else
+                print_info "请执行 'source ~/.zshrc' 或重新打开终端使主题生效"
+            fi
         else
             print_error "主题切换失败，请检查 ~/.zshrc 文件"
         fi
@@ -1077,16 +1083,341 @@ menu_devenv() {
 
 show_banner() {
     echo -e "${CYAN}"
-    echo "  ╦ ╦╔═╗╔═╗╦╔═╔═╗╦ ╦"
-    echo "  ╠═╣╠═╣╚═╗╠╩╗║╣ ╚╦╝"
-    echo "  ╩ ╩╩ ╩╚═╝╩ ╩╚═╝ ╩ "
+    echo '  ██╗  ██╗ █████╗ ███████╗██╗  ██╗███████╗██╗   ██╗'
+    echo '  ██║  ██║██╔══██╗██╔════╝██║ ██╔╝██╔════╝╚██╗ ██╔╝'
+    echo '  ███████║███████║███████╗█████╔╝ █████╗   ╚████╔╝ '
+    echo '  ██╔══██║██╔══██║╚════██║██╔═██╗ ██╔══╝    ╚██╔╝  '
+    echo '  ██║  ██║██║  ██║███████║██║  ██╗███████╗   ██║   '
+    echo '  ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   '
     echo -e "${NC}"
     echo -e "  ${BOLD}Linux 系统常用命令合集${NC}"
-    echo -e "  版本: v1.1.0"
-    echo -e "  作者: kun775"
-    echo -e "  许可: MIT License"
+    echo -e "  版本: v1.1.0  |  作者: kun775  |  许可: MIT License"
     echo -e "  简介: 一键安装、配置和管理 Linux 系统常用工具"
     echo ""
+}
+
+
+# ========================== Nezha 安全工具箱 ==========================
+
+SCRIPT_VERSION="2026-06-16-v4"
+HASKEY_RAW_BASE="https://raw.githubusercontent.com/kun775/haskey/main"
+REAL_SERVER="nz.zkun.de:8008"
+AGENT_DIR="/opt/nezha/agent"
+BIN="$AGENT_DIR/nezha-agent"
+SSHD_CONFIG="/etc/ssh/sshd_config"
+WARN_COUNT=0
+FIX_COUNT=0
+
+nezha_warn() { echo -e "\[0;31m[!] $*\[0m"; }
+nezha_ok()   { echo -e "\[0;32m[✓] $*\[0m"; }
+nezha_info() { echo "  $*"; }
+nezha_fix()  { echo -e "\[1;33m[~] $*\[0m"; }
+
+helper_set_config() {
+  local key="$1" val="$2" cfg="$3"
+  if grep -q "^${key}:" "$cfg"; then
+    sudo sed -i "s/^${key}:.*/${key}: ${val}/" "$cfg"
+  else
+    echo "${key}: ${val}" | sudo tee -a "$cfg" > /dev/null
+  fi
+}
+
+module_incident_report() {
+  echo ""
+  print_title "Nezha 深度取证报告"
+  echo -e "${YELLOW}说明：此功能只读取证据，不清理、不修改系统。${NC}"
+  echo -e "报告默认保存到: ${BOLD}/root/nezha-incident-report-*.txt${NC}"
+  echo ""
+
+  local attacker_ip
+  read -r -p "重点关注 IP（回车默认 207.58.173.192）: " attacker_ip
+  attacker_ip="${attacker_ip:-207.58.173.192}"
+
+  local script_dir script_path
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  script_path="${script_dir}/nezha-incident-check.sh"
+
+  if [ -f "$script_path" ]; then
+    print_info "使用本地脚本: $script_path"
+    sudo ATTACKER_IP="$attacker_ip" bash "$script_path"
+    return $?
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    print_error "未找到 curl，无法拉取远程取证脚本"
+    return 1
+  fi
+
+  print_info "未找到本地脚本，正在从 GitHub 拉取并执行..."
+  curl -fsSL "${HASKEY_RAW_BASE}/nezha-incident-check.sh" | sudo ATTACKER_IP="$attacker_ip" bash
+}
+
+module_intrusion_detect() {
+  echo ""
+  print_title "Nezha 入侵检测"
+  WARN_COUNT=0
+
+  # SystemLog 后门
+  echo -e "--- 1a. SystemLog 后门检测 ---"
+  syslog_detected=0
+  if [ -d /opt/systemlog ]; then
+    nezha_warn "检测到 /opt/systemlog/ 目录"
+    [ -f /opt/systemlog/SystemLoger ] && nezha_warn "  /opt/systemlog/SystemLoger (C2: 24.144.123.109)"
+    [ -f /opt/systemlog/SystemLog ]  && nezha_warn "  /opt/systemlog/SystemLog"
+    syslog_detected=1
+  fi
+  if [ -f /tmp/SystemLog ]; then
+    nezha_warn "检测到 /tmp/SystemLog"
+    syslog_detected=1
+  fi
+  if systemctl list-units --type=service --all 2>/dev/null | grep -q 'systemlog'; then
+    nezha_warn "检测到 systemlog systemd 服务"
+    syslog_detected=1
+  fi
+  if [ "$syslog_detected" -eq 0 ]; then nezha_ok "SystemLog 后门: 未发现"; fi
+
+  # SSH 公钥
+  echo -e "\n--- 1b. SSH authorized_keys 检查 ---"
+  if [ -f /root/.ssh/authorized_keys ]; then
+    kc=$(grep -c 'ssh-' /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+    if [ "$kc" -gt 0 ]; then
+      nezha_warn "/root/.ssh/authorized_keys 中有 $kc 条公钥："
+      while IFS= read -r line; do
+        comment=$(echo "$line" | awk '{print $NF}')
+        keytype=$(echo "$line" | awk '{print $1}')
+        nezha_warn "    [$keytype] $comment"
+      done < /root/.ssh/authorized_keys
+    else
+      nezha_ok "SSH authorized_keys 无有效公钥"
+    fi
+  else
+    nezha_ok "SSH authorized_keys 不存在（安全）"
+  fi
+
+  # memfd
+  echo -e "\n--- 1c. memfd 可疑进程 ---"
+  suspicious=$(ls -la /proc/*/fd/ 2>/dev/null | grep 'memfd' | grep -i 'kworker' | head -5 || true)
+  if [ -n "$suspicious" ]; then
+    nezha_warn "检测到可疑 memfd 进程："
+    while IFS= read -r line; do
+      pid=$(echo "$line" | awk -F'/' '{print $3}')
+      nezha_warn "    PID $pid: $line"
+    done <<< "$suspicious"
+  else
+    nezha_ok "memfd 隐藏进程: 未发现"
+  fi
+}
+
+module_ssh_security() {
+  echo ""
+  print_title "SSH 安全检测"
+  WARN_COUNT=0
+
+  if [ ! -f "$SSHD_CONFIG" ]; then
+    nezha_warn "sshd_config 文件不存在: $SSHD_CONFIG"
+    return
+  fi
+
+  local checks=(
+    "PermitRootLogin:no:禁止 root 登录"
+    "PasswordAuthentication:no:禁止密码登录"
+    "PubkeyAuthentication:yes:开启 SSH Key 登录"
+    "ChallengeResponseAuthentication:no:关闭挑战响应认证"
+    "UsePAM:no:禁用 PAM 认证"
+    "PermitEmptyPasswords:no:禁止空密码"
+    "ClientAliveInterval:300:客户端保活间隔(秒)"
+    "ClientAliveCountMax:2:客户端保活最大次数"
+    "MaxAuthTries:3:最大认证尝试次数"
+    "MaxSessions:10:最大会话数"
+    "Protocol:2:仅使用 SSHv2"
+  )
+
+  local fix_items=""
+
+  for entry in "${checks[@]}"; do
+    IFS=':' read -r key expected desc <<< "$entry"
+    actual=$(grep -i "^\s*${key}" "$SSHD_CONFIG" 2>/dev/null | awk '{print $2}' | tail -1)
+    actual_lower=$(echo "$actual" | tr 'A-Z' 'a-z')
+
+    if [ "$key" = "PermitRootLogin" ] && [ "$actual_lower" = "prohibit-password" ]; then
+      nezha_ok "$desc (当前: $actual)"
+      continue
+    fi
+
+    if [ "$actual_lower" = "$expected" ]; then
+      nezha_ok "$desc (当前: $actual)"
+    elif [ -z "$actual" ]; then
+      echo -e "\[0;31m[!] $desc → 未配置（期望: $expected）\[0m"
+      WARN_COUNT=$((WARN_COUNT+1))
+      fix_items="$fix_items\n${key} ${expected}"
+    else
+      echo -e "\[0;31m[!] $desc → 当前: $actual（期望: $expected）\[0m"
+      WARN_COUNT=$((WARN_COUNT+1))
+      fix_items="$fix_items\n${key} ${expected}"
+    fi
+  done
+
+  if [ -n "$fix_items" ]; then
+    echo ""; read -r -p "  是否修复以上 SSH 配置项？(y/N): " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+      sudo cp "$SSHD_CONFIG" "${SSHD_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+      while IFS= read -r item; do
+        [ -z "$item" ] && continue
+        key=$(echo "$item" | awk '{print $1}')
+        val=$(echo "$item" | awk '{print $2}')
+        if grep -qi "^\s*${key}" "$SSHD_CONFIG"; then
+          sudo sed -i "s/^\s*${key}.*/${key} ${val}/I" "$SSHD_CONFIG"
+        else
+          echo "${key} ${val}" | sudo tee -a "$SSHD_CONFIG" > /dev/null
+        fi
+        nezha_fix "已设置: $key $val"
+      done <<< "$(echo -e "$fix_items")"
+      if sudo sshd -t 2>/dev/null; then
+        sudo systemctl restart sshd 2>/dev/null || sudo systemctl restart ssh 2>/dev/null || true
+        nezha_ok "sshd 配置已应用并重启"
+      fi
+    fi
+  else
+    nezha_ok "SSH 配置全部达标"
+  fi
+}
+
+module_clean_and_harden() {
+  echo ""
+  print_title "Nezha 清理加固"
+
+  # MD5 校验
+  echo -e "--- 3a. 二进制校验 ---"
+  if [ -f "$BIN" ]; then
+    local expected_md5="F577C5450B116FF905F3D5C1859A9892"
+    local actual_md5
+    actual_md5=$(md5sum "$BIN" | awk '{print $1}' | tr 'a-z' 'A-Z')
+    if [ "$actual_md5" != "$expected_md5" ]; then
+      echo -e "\[0;31m[!] MD5 不匹配！期望: $expected_md5, 实际: $actual_md5\[0m"
+    else
+      nezha_ok "MD5 校验通过"
+    fi
+  fi
+
+  # 扫描配置
+  echo -e "\n--- 3b. 扫描 Agent 配置 ---"
+  local configs
+  configs=$(find "$AGENT_DIR" -name 'config*.yml' 2>/dev/null || true)
+  [ -z "$configs" ] && { nezha_info "未找到配置文件"; return; }
+
+  for cfg in $configs; do
+    local server cfgname cfgdir
+    server=$(grep '^server:' "$cfg" 2>/dev/null | awk '{print $2}')
+    cfgname=$(basename "$cfg")
+    cfgdir=$(dirname "$cfg")
+
+    if [ "$server" != "$REAL_SERVER" ]; then
+      echo -e "\[0;31m[!] 虚假 Agent: $cfg\[0m"
+      for sf in $(grep -rl "$cfgname" /etc/systemd/system/ 2>/dev/null || true); do
+        local sn
+        sn=$(basename "$sf" | sed 's/\.service$//')
+        sudo systemctl stop "$sn" 2>/dev/null || true
+        sudo systemctl disable "$sn" 2>/dev/null || true
+        sudo rm -f "$sf"
+        nezha_info "已移除 systemd: $sn"
+      done
+      local pid
+      pid=$(ps aux | grep "nezha-agent.*${cfgname}" | grep -v grep | awk '{print $2}')
+      [ -n "$pid" ] && sudo kill -9 "$pid" 2>/dev/null || true
+      sudo rm -f "$cfg"
+      nezha_info "已删除: $cfg"
+    else
+      nezha_ok "真实 Agent: $cfg"
+      if [ "$cfgname" != "config.yml" ]; then
+        sudo cp "$cfg" "${cfg}.bak.$(date +%Y%m%d%H%M%S)"
+        sudo mv "$cfg" "$cfgdir/config.yml"
+        cfg="$cfgdir/config.yml"
+        for sf in /etc/systemd/system/nezha-agent*.service; do
+          [ -f "$sf" ] || continue
+          if grep -q "$cfgname" "$sf" 2>/dev/null; then
+            sudo sed -i "s|$cfgname|config.yml|g" "$sf"
+            nezha_info "更新 systemd: $sf"
+          fi
+        done
+        sudo systemctl daemon-reload 2>/dev/null || true
+      fi
+      for key in "disable_command_execute:true" "disable_force_update:true" "disable_nat:true" "disable_send_query:true" "disable_auto_update:true" "insecure_tls:false"; do
+        k=${key%%:*}; v=${key#*:}
+        helper_set_config "$k" "$v" "$cfg"
+      done
+      for sf in /etc/systemd/system/nezha-agent*.service; do
+        [ -f "$sf" ] || continue
+        local sn
+        sn=$(basename "$sf" | sed 's/\.service$//')
+        sudo systemctl restart "$sn" 2>/dev/null || true
+        nezha_info "已重启: $sn"
+      done
+    fi
+  done
+
+  # 清理残留
+  echo -e "\n--- 3c. 清理残留 ---"
+  for sf in /etc/systemd/system/nezha-agent*.service; do
+    [ -f "$sf" ] || continue
+    local ref_cfg sn
+    ref_cfg=$(grep '\-c ' "$sf" 2>/dev/null | grep -oP 'config[^\s"]+' || true)
+    if [ -n "$ref_cfg" ] && [ ! -f "$AGENT_DIR/$ref_cfg" ]; then
+      sn=$(basename "$sf" | sed 's/\.service$//')
+      sudo systemctl stop "$sn" 2>/dev/null || true
+      sudo systemctl disable "$sn" 2>/dev/null || true
+      sudo rm -f "$sf"
+      nezha_info "已移除孤立 service: $sn"
+    fi
+  done
+  sudo find /etc/systemd/system -maxdepth 2 -type d -name 'nezha-agent*.d' -exec rm -rf {} + 2>/dev/null || true
+  for pp in $(ps aux | grep '[n]ezha-agent' | awk '{print $2}'); do
+    local pc ci
+    pc=$(ps -p "$pp" -o args= 2>/dev/null || true)
+    ci=$(echo "$pc" | grep -oP '\-c\s+\S+' | awk '{print $2}' || true)
+    if [ -n "$ci" ] && [ ! -f "$ci" ]; then
+      sudo kill -9 "$pp" 2>/dev/null || true
+      nezha_info "已杀孤魂进程 PID $pp"
+    fi
+  done
+  sudo systemctl daemon-reload 2>/dev/null || true
+}
+
+menu_nezha() {
+    while true; do
+        clear
+        echo ""
+        print_line
+        echo -e "  ${BOLD}${GREEN}Nezha 安全工具箱${NC}"
+        print_line
+        echo ""
+        echo -e "  ${GREEN}1${NC}) 入侵检测"
+        echo -e "     SystemLog 后门 / SSH 公钥 / memfd 隐藏进程"
+        echo ""
+        echo -e "  ${GREEN}2${NC}) SSH 安全检测"
+        echo -e "     检查/修复禁止root登录、禁止密码、开启密钥登录"
+        echo ""
+        echo -e "  ${GREEN}3${NC}) 清理虚假Agent + 加固"
+        echo -e "     清理非白名单 Agent / 统一 config.yml / 禁用危险功能"
+        echo ""
+        echo -e "  ${GREEN}4${NC}) 深度取证报告"
+        echo -e "     只读检测 SSH/账户/cron/systemd/日志/可疑连接，生成报告"
+        echo ""
+        echo -e "  ${GREEN}5${NC}) 全量执行"
+        echo ""
+        echo -e "  ${YELLOW}0${NC}) 返回主菜单"
+        echo ""
+        print_line
+        read -p "请输入编号: " choice
+        case "$choice" in
+            1) module_intrusion_detect; read -p "按回车返回..." ;;
+            2) module_ssh_security; read -p "按回车返回..." ;;
+            3) module_clean_and_harden; read -p "按回车返回..." ;;
+            4) module_incident_report; read -p "按回车返回..." ;;
+            5) module_intrusion_detect; module_ssh_security; module_clean_and_harden; read -p "按回车返回..." ;;
+            0) return ;;
+            *) print_error "无效选择"; sleep 1 ;;
+        esac
+    done
 }
 
 main_menu() {
@@ -1102,6 +1433,7 @@ main_menu() {
         echo -e "  ${GREEN}3${NC}) 系统监控"
         echo -e "  ${GREEN}4${NC}) Docker 管理"
         echo -e "  ${GREEN}5${NC}) 开发环境"
+        echo -e "  ${GREEN}6${NC}) Nezha 安全工具箱"
         echo ""
         echo -e "  ${YELLOW}0${NC}) 退出"
         echo ""
@@ -1114,6 +1446,7 @@ main_menu() {
             3) menu_monitor ;;
             4) menu_docker ;;
             5) menu_devenv ;;
+            6) menu_nezha ;;
             0)
                 echo ""
                 echo -e "${GREEN}感谢使用 haskey，再见！${NC}"
