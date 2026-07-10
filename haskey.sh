@@ -4,7 +4,7 @@
 # haskey.sh — Linux 系统常用命令合集
 # 功能：快速安装、配置和显示 Linux 系统常用工具
 # 作者：kun775
-# 版本：v1.0.0
+# 版本：v1.1.0
 # 版权：MIT License
 # 仓库：https://github.com/kun775/haskey
 ###############################################################################
@@ -516,6 +516,55 @@ sys_disk() {
     press_any_key
 }
 
+# 系统安全检查（只读）
+sys_security_check() {
+    print_title "系统安全检查"
+
+    print_info "── 防火墙状态 ──"
+    if command -v ufw &>/dev/null; then
+        sudo ufw status 2>/dev/null || ufw status 2>/dev/null || print_warn "无法读取 ufw 状态"
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --state 2>/dev/null || print_warn "firewalld 未运行或无法读取状态"
+    else
+        print_warn "未检测到 ufw 或 firewalld"
+    fi
+
+    echo ""
+    print_info "── 对外监听端口 ──"
+    if command -v ss &>/dev/null; then
+        ss -tuln 2>/dev/null || print_warn "无法读取监听端口"
+    elif command -v netstat &>/dev/null; then
+        netstat -tuln 2>/dev/null || print_warn "无法读取监听端口"
+    else
+        print_warn "未找到 ss 或 netstat 命令"
+    fi
+
+    echo ""
+    print_info "── 最近失败登录（最多 10 条）──"
+    if command -v lastb &>/dev/null; then
+        lastb -n 10 2>/dev/null || print_warn "无权限读取失败登录记录或暂无记录"
+    elif [ -r /var/log/auth.log ]; then
+        grep -i "failed password" /var/log/auth.log | tail -10 || echo "  (无记录)"
+    elif [ -r /var/log/secure ]; then
+        grep -i "failed password" /var/log/secure | tail -10 || echo "  (无记录)"
+    else
+        print_warn "未找到可读取的失败登录记录"
+    fi
+
+    echo ""
+    print_info "── 可用系统更新 ──"
+    case "${PKG_MANAGER:-}" in
+        apt) apt list --upgradable 2>/dev/null | sed 1d | head -20 || print_warn "无法检查更新" ;;
+        dnf) dnf check-update -q 2>/dev/null | head -20; [ "${PIPESTATUS[0]}" -le 100 ] || print_warn "无法检查更新" ;;
+        yum) yum check-update -q 2>/dev/null | head -20; [ "${PIPESTATUS[0]}" -le 100 ] || print_warn "无法检查更新" ;;
+        pacman) checkupdates 2>/dev/null | head -20 || print_warn "请安装 pacman-contrib 后检查更新" ;;
+        zypper) zypper list-updates 2>/dev/null | head -20 || print_warn "无法检查更新" ;;
+        *) print_warn "未检测到支持的包管理器，跳过更新检查" ;;
+    esac
+
+    press_any_key
+}
+
 # 系统监控子菜单
 menu_monitor() {
     while true; do
@@ -525,6 +574,7 @@ menu_monitor() {
         echo -e "  ${GREEN}3${NC}) 内存使用情况"
         echo -e "  ${GREEN}4${NC}) 磁盘使用情况"
         echo -e "  ${GREEN}5${NC}) 实时资源监控（top）"
+        echo -e "  ${GREEN}6${NC}) 系统安全检查（只读）"
         echo ""
         echo -e "  ${YELLOW}0${NC}) 返回上一级"
         echo ""
@@ -541,6 +591,7 @@ menu_monitor() {
                 sleep 1
                 top
                 ;;
+            6) detect_pkg_manager >/dev/null 2>&1; sys_security_check ;;
             0) return ;;
             *) print_error "无效选择，请重新输入"; sleep 1 ;;
         esac
@@ -1031,7 +1082,7 @@ show_banner() {
     echo "  ╩ ╩╩ ╩╚═╝╩ ╩╚═╝ ╩ "
     echo -e "${NC}"
     echo -e "  ${BOLD}Linux 系统常用命令合集${NC}"
-    echo -e "  版本: v1.0.0"
+    echo -e "  版本: v1.1.0"
     echo -e "  作者: kun775"
     echo -e "  许可: MIT License"
     echo -e "  简介: 一键安装、配置和管理 Linux 系统常用工具"
